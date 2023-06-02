@@ -32,6 +32,8 @@ INCLUDE(${CMAKE_MODULE_PATH}/SetFortranFlags.cmake)
 
 # Define the executable name
 SET(TESTEXE test)
+SET(TESTDATAEXE testdata)
+SET(TESTBACKPROPEXE testbackprop)
 
 # Define the library name
 SET(NEURALLIB neural)

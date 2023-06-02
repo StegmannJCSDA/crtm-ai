@@ -1,7 +1,10 @@
 MODULE NN_Layer_Define
 
   USE, INTRINSIC :: ISO_FORTRAN_ENV, ONLY: dp => real64
-  USE NN_ActivationFunctions, ONLY: SIGMOID, RELU
+  USE NN_ActivationFunctions, ONLY: SIGMOID, &
+                                    SIGMOID_DERIV, &
+                                    RELU, &
+                                    RELU_DERIV
 
   ! -----------------------
   ! Disable implicit typing
@@ -14,12 +17,12 @@ MODULE NN_Layer_Define
   ! Everything private by default
   PRIVATE
 
-  INTERFACE
-    FUNCTION activation_function(x)
-      REAL :: activation_function
-      REAL, INTENT(IN) :: x
-    END FUNCTION activation_function
-  END INTERFACE
+  ! INTERFACE
+  !   FUNCTION activation_function(x)
+  !     REAL :: activation_function
+  !     REAL, INTENT(IN) :: x
+  !   END FUNCTION activation_function
+  ! END INTERFACE
 
   TYPE, PUBLIC :: Layer
     REAL, ALLOCATABLE :: Input(:)
@@ -39,6 +42,7 @@ MODULE NN_Layer_Define
     PROCEDURE, PUBLIC, PASS :: Layer_Create
     FINAL                   :: Layer_Destroy
     PROCEDURE, PUBLIC, PASS :: ActivationFunction
+    PROCEDURE, PUBLIC, PASS :: ActivationFunction_Deriv
     PROCEDURE, PUBLIC, PASS :: Layer_Init_Gradients
     PROCEDURE, PASS         :: FlushGradients
   END TYPE Layer
@@ -50,18 +54,32 @@ CONTAINS
   ! CONSTRUCTOR
   !
   !**************************************
-  SUBROUTINE Layer_Create(this,m,n,activ_func_name)
+  SUBROUTINE Layer_Create(this,m,n,activ_func_name,training)
     ! Data dictionary
     INTEGER, INTENT(IN) :: m ! Size of the previous layer
     INTEGER, INTENT(IN) :: n ! Size of the current layer
     CLASS(Layer), INTENT(INOUT) :: this
     CHARACTER(*), INTENT(IN) :: activ_func_name
+    LOGICAL, INTENT(IN), OPTIONAL :: training
     ! Allocate layer data
     IF(.NOT. this%is_allocated ) THEN
-      ALLOCATE(this%Input(m),  &
-               this%Output(n), &
-               this%Bias(n), & 
-               this%Weights(n,m) )
+      IF(PRESENT(training) .AND. training) THEN
+        ALLOCATE(this%Input(m),  &
+                 this%Output(n), &
+                 this%Bias(n), & 
+                 this%Weights(n,m), &
+                 this%Weight_gradient(n,m), &
+                 this%Cumulative_Weight_gradient(n,m), &
+                 this%Bias_gradient(n), &
+                 this%Cumulative_Bias_gradient(n), &
+                 this%delta(n) )
+        this%gradient_is_allocated = .TRUE.
+      ELSE
+        ALLOCATE(this%Input(m),  &
+                 this%Output(n), &
+                 this%Bias(n), & 
+                 this%Weights(n,m) )
+      END IF
       this%is_allocated = .TRUE.
     END IF
     this%ActivationFunctionName = activ_func_name
@@ -112,6 +130,11 @@ CONTAINS
     WRITE(*,*) 'Initializing layer gradients.'
   END SUBROUTINE Layer_Init_Gradients
 
+  !*********************************
+  !
+  ! Activation Function
+  !
+  !*********************************
   PURE ELEMENTAL FUNCTION ActivationFunction(this,x) RESULT(y)
     ! 
     ! Activation function wrapper.
@@ -128,6 +151,28 @@ CONTAINS
     END SELECT
     RETURN
   END FUNCTION ActivationFunction
+
+  !*********************************
+  !
+  ! Activation Function Gradient
+  !
+  !*********************************
+  PURE ELEMENTAL FUNCTION ActivationFunction_Deriv(this,x) RESULT(y)
+    ! 
+    ! Activation function wrapper.
+    !
+    ! Data dictionary
+    CLASS(Layer), INTENT(IN) :: this
+    REAL, INTENT(in) :: x
+    REAL :: y
+    SELECT CASE(this%ActivationFunctionName)
+    CASE('sigmoid')
+      y = SIGMOID_DERIV(x)
+    CASE('relu')
+      y = RELU_DERIV(x)
+    END SELECT
+    RETURN
+  END FUNCTION ActivationFunction_Deriv
 
   SUBROUTINE FlushGradients(this)
     ! 

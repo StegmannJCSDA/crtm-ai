@@ -3,10 +3,14 @@
 ########################################
 
 # Add the source files
-SET(TEST_src ${SRCTEST}/main.f90)
+SET(TEST_src ${SRCTEST}/test_NetConstructor.f90)
+SET(TESTDT_src ${SRCTEST}/test_TrainingData.f90)
+SET(TESTBP_src ${SRCTEST}/test_Backprop.f90)
 
 # Define the executable in terms of the source files
 ADD_EXECUTABLE(${TESTEXE} ${TEST_src})
+ADD_EXECUTABLE(${TESTDATAEXE} ${TESTDT_src})
+ADD_EXECUTABLE(${TESTBACKPROPEXE} ${TESTBP_src})
 
 #####################################################
 # Add the needed libraries and special compiler flags
@@ -17,7 +21,22 @@ TARGET_LINK_LIBRARIES(${TESTEXE} ${NEURALLIB})
 TARGET_LINK_LIBRARIES(${TESTEXE} HDF5::HDF5)
 TARGET_LINK_LIBRARIES(${TESTEXE} netCDF::netcdf)
 
+# This links TRAININGDATAEXE to the NEURALLIB library
+TARGET_LINK_LIBRARIES(${TESTDATAEXE} ${NEURALLIB})
+TARGET_LINK_LIBRARIES(${TESTDATAEXE} HDF5::HDF5)
+TARGET_LINK_LIBRARIES(${TESTDATAEXE} netCDF::netcdf)
+
+# This links TESTBACKPROPEXE to the NEURALLIB library
+TARGET_LINK_LIBRARIES(${TESTBACKPROPEXE} ${NEURALLIB})
+TARGET_LINK_LIBRARIES(${TESTBACKPROPEXE} HDF5::HDF5)
+TARGET_LINK_LIBRARIES(${TESTBACKPROPEXE} netCDF::netcdf)
+
+
 ADD_TEST(NAME ConstructorTest COMMAND ${TESTEXE})
+ADD_TEST(NAME CreateTrainingData COMMAND ${SRCTEST}/test_data.py)
+ADD_TEST(NAME TrainingDataTest COMMAND ${TESTDATAEXE})
+ADD_TEST(NAME BackPropagationTest COMMAND ${TESTBACKPROPEXE})
+
 
 # Uncomment if you need to link to BLAS and LAPACK
 #TARGET_LINK_LIBRARIES(${FOOEXE} ${BLAS_LIBRARIES}
@@ -41,9 +60,9 @@ ADD_TEST(NAME ConstructorTest COMMAND ${TESTEXE})
 # Tell how to install this executable
 #####################################
 
-IF(WIN32)
-    SET(CMAKE_INSTALL_PREFIX "C:\\Program Files")
-ELSE()
-    SET(CMAKE_INSTALL_PREFIX /usr/local)
-ENDIF(WIN32)
-INSTALL(TARGETS ${FOOEXE} RUNTIME DESTINATION bin)
+#IF(WIN32)
+#    SET(CMAKE_INSTALL_PREFIX "C:\\Program Files")
+#ELSE()
+#    SET(CMAKE_INSTALL_PREFIX /usr/local)
+#ENDIF(WIN32)
+#INSTALL(TARGETS ${FOOEXE} RUNTIME DESTINATION bin)
