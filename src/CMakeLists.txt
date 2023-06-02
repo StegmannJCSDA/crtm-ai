@@ -2,6 +2,7 @@
 SET(NEURAL_src ${SRCNEURAL}/NeuralNet_Define.f90
                ${SRCNEURAL}/NN_Layer_Define.f90
                ${SRCNEURAL}/NN_ActivationFunctions.f90
+               ${SRCNEURAL}/NN_CostFunction.f90
                ${SRCNEURAL}/NN_netCDF_IO.f90
                ${SRCNEURAL}/NN_TensorFlow_IO.f90
                ${SRCNEURAL}/NN_TrainingData.f90

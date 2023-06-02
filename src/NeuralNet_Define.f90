@@ -1,12 +1,24 @@
 MODULE NeuralNet_Define
 
   USE NN_Layer_Define
+  USE NN_CostFunction, ONLY: LeastSquares_Cost, &
+                             LeastSquares_Deriv, &
+                             CrossEntropy_Cost, &
+                             CrossEntropy_Deriv
   USE NN_TrainingData, ONLY: Training_data
   USE NN_ActivationFunctions, ONLY: SIGMOID, RELU
   
   IMPLICIT NONE
 
   PRIVATE
+
+  ! INTERFACE
+  !   FUNCTION cost_function(y,t)
+  !     REAL :: activation_function
+  !     REAL, DIMENSION(:), INTENT(IN) :: y
+  !     REAL, DIMENSION(:), INTENT(IN) :: t
+  !   END FUNCTION cost_function
+  ! END INTERFACE
 
   !**************************************
   !
@@ -31,12 +43,15 @@ MODULE NeuralNet_Define
                                                  ! The list of Layer objects of the net.
     LOGICAL :: is_allocated = .FALSE.
     !INTEGER :: gradient_size 
+    CHARACTER(LEN=12) :: CostFunctionName = "None"
   CONTAINS
     PROCEDURE, PUBLIC, PASS :: NeuralNet_Create  ! Constructor
     FINAL                   :: NeuralNet_Destroy ! Destructor
     PROCEDURE, PUBLIC, PASS :: Init
     PROCEDURE, PUBLIC, PASS :: Init_Gradients 
     PROCEDURE, PUBLIC, PASS :: Clear_Gradients
+    PROCEDURE, PUBLIC, PASS :: CostFunction 
+    PROCEDURE, PUBLIC, PASS :: CostFunction_Deriv
     PROCEDURE, PUBLIC, PASS :: Batch_Gradient_Descent
     PROCEDURE, PUBLIC, PASS :: ForwardPass
     PROCEDURE, PUBLIC, PASS :: BackPropagation
@@ -50,13 +65,22 @@ CONTAINS
   ! CONSTRUCTOR
   !
   !**************************************
-  SUBROUTINE NeuralNet_Create(this,sizes,input_size,activ_fn)
+  SUBROUTINE NeuralNet_Create(this, &
+                              sizes, &
+                              input_size, &
+                              activ_fn, &
+                              cost_fn, &
+                              training)
     CLASS(NeuralNet) :: this
     INTEGER, INTENT(IN) :: sizes(:)
     INTEGER, INTENT(IN) :: input_size
     CHARACTER(LEN=*), INTENT(IN) :: activ_fn
+    CHARACTER(LEN=*), INTENT(IN) :: cost_fn
+    LOGICAL, INTENT(IN), OPTIONAL :: training
     INTEGER :: ii
     INTEGER :: alloc_stat
+    ! Set cost function name
+    this%CostFunctionName = cost_fn
     ! Allocate neuron size storage
     this%n_layers = SIZE(sizes)
     IF(.NOT. ALLOCATED(this%n_neurons)) THEN
@@ -70,12 +94,14 @@ CONTAINS
     CALL this%LayerSequence(1)%Layer_Create( &
             input_size, &
             this%n_neurons(1), &
-            activ_fn)
+            activ_fn, &
+            training)
     LayerAllocLoop: DO ii = 2, this%n_layers
       CALL this%LayerSequence(ii)%Layer_Create( &
                 this%n_neurons(ii-1), &
                 this%n_neurons(ii), &
-                activ_fn)
+                activ_fn, &
+                training)
     END DO LayerAllocLoop
     this%is_allocated = .TRUE.
     RETURN
@@ -139,6 +165,7 @@ CONTAINS
             input_size, &
             this%n_neurons(1))
     LayerAllocLoop: DO ii = 2, this%n_layers
+      WRITE(*,*) ii
       CALL this%LayerSequence(ii)%Layer_Init_Gradients( &
                 this%n_neurons(ii-1), &
                 this%n_neurons(ii) )
@@ -170,17 +197,63 @@ CONTAINS
     RETURN
   END SUBROUTINE Clear_Gradients
 
+  !************************************
+  !
+  ! Cost Function
+  !
+  !************************************
+  PURE FUNCTION CostFunction(this,y,t) RESULT(cost)
+    ! 
+    ! COST function wrapper.
+    !
+    ! Data dictionary
+    CLASS(NeuralNet), INTENT(IN) :: this
+    REAL, DIMENSION(:), INTENT(in) :: t
+    REAL, DIMENSION(:), INTENT(in) :: y
+    REAL :: cost 
+    SELECT CASE(this%CostFunctionName)
+    CASE('LeastSquares')
+      cost = LeastSquares_Cost(y,t)
+    CASE('CategoricalCrossEntropy')
+      cost = CrossEntropy_Cost(y,t)
+    END SELECT
+    RETURN
+  END FUNCTION CostFunction
+
+  !************************************
+  !
+  ! Cost Function Gradient/Derivative
+  !
+  !************************************
+  PURE ELEMENTAL FUNCTION CostFunction_Deriv(this,y,t) RESULT(cost_grad)
+    ! 
+    ! COST function wrapper.
+    !
+    ! Data dictionary
+    CLASS(NeuralNet), INTENT(IN) :: this
+    REAL, INTENT(in) :: t
+    REAL, INTENT(in) :: y
+    REAL :: cost_grad
+    SELECT CASE(this%CostFunctionName)
+    CASE('LeastSquares')
+      cost_grad = LeastSquares_Deriv(y,t)
+    CASE('CategoricalCrossEntropy')
+      cost_grad = CrossEntropy_Deriv(y,t)
+    END SELECT
+    RETURN
+  END FUNCTION CostFunction_Deriv
+
   !****************************************************
   !
   ! Stochastic Gradient Descent for model optimization
   !
   !****************************************************
   SUBROUTINE Batch_Gradient_Descent(this, &
-                                         learning_rate, &
-                                         !NumBatches, &
-                                         BatchSize, &
-                                         NumIterations, &
-                                         training_datum)
+                                    learning_rate, &
+                                    !NumBatches, &
+                                    BatchSize, &
+                                    NumIterations, &
+                                    training_datum)
     CLASS(NeuralNet) :: this
     REAL, INTENT(IN) :: learning_rate
     !INTEGER, INTENT(IN) :: NumBatches
@@ -193,9 +266,16 @@ CONTAINS
     REAL :: u 
     INTEGER :: randint
     REAL, DIMENSION(this%n_neurons(this%n_layers)) :: model_output
+    REAL :: Cumulative_cost
+    CHARACTER(LEN=30) :: filename
+    INTEGER :: fileunit
 
     ! Step 1: Initialize gradients randomly
     CALL this%Init_Gradients( SIZE(training_datum%x) )
+    ! Cost function output file
+    filename = "cost.txt"
+    fileunit = 1013
+    OPEN(UNIT=fileunit, FILE=filename, STATUS='REPLACE')
     ! Step 2: Iterate over the dataset towards 
     !         (hopefully) convergence
     SampleLoop: DO ii = 1, NumIterations
@@ -204,17 +284,22 @@ CONTAINS
         this%LayerSequence(kk)%Cumulative_Weight_gradient(:,:) = 0.0
         this%LayerSequence(kk)%Cumulative_Bias_gradient(:) = 0.0
       END DO ZeroOutGradientsLoop
+      Cumulative_cost = 0
       ! Step 4: Loop over batch members
       BatchLoop: DO jj = 1, BatchSize
         ! Step 5: Select random input from training data
         CALL RANDOM_NUMBER(u)
         randint = FLOOR((training_datum%dataset_size+1)*u)
+        !randint = jj
         ! Step 6: Run a forward pass and save results
-        model_output = this%ForwardPass( training_datum%x(randint) )
+        model_output = this%ForwardPass( training_datum%x(randint,:) )
         ! Step 7: Backpropagation of the gradients
-        CALL this%BackPropagation( training_datum%y(randint) )
-          ! TBD: Compute Cost function
-          ! TBD: Print Cost function
+        !ZeroOutBatchGradientsLoop: DO kk = 1, this%n_layers
+        !  this%LayerSequence(kk)%Weight_gradient(:,:) = 0.0
+        !  this%LayerSequence(kk)%Bias_gradient(:) = 0.0
+        !END DO ZeroOutBatchGradientsLoop
+        CALL this%BackPropagation( training_datum%y(randint,:) )
+        Cumulative_cost = Cumulative_cost + this%CostFunction( model_output, training_datum%y(randint,:) )
         ! Step 8: Add the gradients
         AddGradientsLoop: DO kk = 1, this%n_layers
           this%LayerSequence(kk)%Cumulative_Weight_gradient = &
@@ -234,7 +319,11 @@ CONTAINS
                                     - learning_rate/BatchSize &
                                     *this%LayerSequence(kk)%Cumulative_Bias_gradient
       END DO GradientUpdateLoop
+      ! Compute and print Cost function for batch
+      WRITE(*,*) ii, ", ", jj, " Cost: ", Cumulative_cost/BatchSize
+      WRITE(fileunit, '(F10.6)') Cumulative_cost/BatchSize
     END DO SampleLoop
+    CLOSE(fileunit)
     RETURN
   END SUBROUTINE Batch_Gradient_Descent
 
@@ -249,21 +338,21 @@ CONTAINS
     REAL, DIMENSION(this%n_neurons(SIZE(this%n_neurons))) :: output_vec
     INTEGER :: ii
     ASSOCIATE(Layer => this%LayerSequence)
-    WRITE(*,*) 'Computing input layer.'
-    Layer(1)%Output = &
-            Layer(1)%ActivationFunction( & 
-                 MATMUL(Layer(1)%Weights,input_vec) ) 
-                     !+ Layer(1)%Bias) ! No bias for now
-    WRITE(*,*) 'Entering Layer evaluation loop.'
-    EvaluationLoop: DO ii = 2, this%n_layers
-      WRITE(*,*) 'Layer #', ii
-      Layer(ii)%Output = &
-           Layer(ii)%ActivationFunction( &
-                MATMUL(Layer(ii)%Weights,Layer(ii-1)%Output) )
-                    ! + Layer(ii)%Bias)
-    END DO EvaluationLoop
-    WRITE(*,*) 'Assigning network output.'
-    output_vec = Layer(this%n_layers)%Output
+      WRITE(*,*) 'Computing input layer.'
+      Layer(1)%Output = &
+              Layer(1)%ActivationFunction( & 
+                   MATMUL(Layer(1)%Weights,input_vec)  &
+                       + Layer(1)%Bias) ! No bias for now
+      WRITE(*,*) 'Entering Layer evaluation loop.'
+      EvaluationLoop: DO ii = 2, this%n_layers
+        WRITE(*,*) 'Layer #', ii
+        Layer(ii)%Output = &
+             Layer(ii)%ActivationFunction( &
+                  MATMUL(Layer(ii)%Weights,Layer(ii-1)%Output) &
+                       + Layer(ii)%Bias)
+      END DO EvaluationLoop
+      WRITE(*,*) 'Assigning network output.'
+      output_vec = Layer(this%n_layers)%Output
     END ASSOCIATE
     RETURN
   END FUNCTION ForwardPass
@@ -285,11 +374,14 @@ CONTAINS
       ! Gradient of output layer N:
       !
       ! d_N = dL/dy * df/dz
-      !   = (y_N - t) * (y_N*(1 - y__N))
+      !   = (y_N - t) * (y_N*(1 - y_N))
       !
-      Layer(this%n_layers)%delta = ( Layer(this%n_layers)%Output - training_data) &
-                             *Layer(this%n_layers)%Output &
-                             *( 1. - Layer(this%n_layers)%Output )
+      !Layer(this%n_layers)%delta = ( Layer(this%n_layers)%Output - training_data) &
+      !                       *Layer(this%n_layers)%Output &
+      !                       *( 1. - Layer(this%n_layers)%Output )
+      Layer(this%n_layers)%delta = this%CostFunction_Deriv(Layer(this%n_layers)%Output,training_data) &
+                                   *Layer(this%n_layers)%ActivationFunction_Deriv(Layer(this%n_layers)%Output)
+
       !
       ! Bias gradients in output layer N:
       ! 
@@ -321,8 +413,10 @@ CONTAINS
       ! 
       LayerRecursion: DO ii = (this%n_layers-1), 1, -1
         WRITE(*,*) 'sha', SHAPE(TRANSPOSE(Layer(ii)%Weights)), SHAPE(Layer(ii+1)%delta )
+        !Layer(ii)%delta = SUM( MATMUL( TRANSPOSE(Layer(ii+1)%Weights), Layer(ii+1)%delta ) ) &
+        !            *Layer(ii)%Output*( 1. - Layer(ii)%Output )
         Layer(ii)%delta = SUM( MATMUL( TRANSPOSE(Layer(ii+1)%Weights), Layer(ii+1)%delta ) ) &
-                    *Layer(ii)%Output*( 1. - Layer(ii)%Output )
+                          *Layer(ii)%ActivationFunction_Deriv(Layer(ii)%Output)
         Layer(ii)%Bias_gradient = Layer(ii)%delta
         Layer(ii)%Weight_gradient = MATMUL( RESHAPE(Layer(ii)%Output,(/SIZE(Layer(ii)%Output),1/)), &
                  RESHAPE(Layer(ii)%delta,(/1,SIZE(Layer(ii)%delta)/)) )

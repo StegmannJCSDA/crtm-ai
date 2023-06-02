@@ -3,8 +3,8 @@ MODULE NN_TrainingData
   IMPLICIT NONE
 
   TYPE :: Training_data
-    REAL, DIMENSION(:), ALLOCATABLE :: x
-    REAL, DIMENSION(:), ALLOCATABLE :: y
+    REAL, DIMENSION(:,:), ALLOCATABLE :: x
+    REAL, DIMENSION(:,:), ALLOCATABLE :: y
     INTEGER :: dataset_size = 0
     LOGICAL :: is_allocated = .FALSE.
   CONTAINS
@@ -20,13 +20,15 @@ CONTAINS
   ! CONSTRUCTOR
   !
   !**************************************
-  SUBROUTINE Training_data_Create(this,n)
+  SUBROUTINE Training_data_Create(this,n,m,k)
     CLASS(Training_data), INTENT(INOUT) :: this
     INTEGER, INTENT(IN) :: n
-    this%dataset_size = n
+    INTEGER, INTENT(IN) :: m
+    INTEGER, INTENT(IN) :: k
+    !this%dataset_size = n
     IF( .NOT. this%is_allocated ) THEN
-      ALLOCATE( this%x(n) )
-      ALLOCATE( this%y(n) )
+      ALLOCATE( this%x(n,k) )
+      ALLOCATE( this%y(n,m) )
       this%dataset_size = n
       this%is_allocated = .TRUE.
     END IF
@@ -51,8 +53,8 @@ CONTAINS
     
   SUBROUTINE Training_data_set(this,a,b)
     CLASS(Training_data), INTENT(INOUT) :: this
-    REAL, DIMENSION(:), INTENT(IN) :: a
-    REAL, DIMENSION(:), INTENT(IN) :: b
+    REAL, DIMENSION(:,:), INTENT(IN) :: a
+    REAL, DIMENSION(:,:), INTENT(IN) :: b
     this%x = a
     this%y = b
     RETURN
